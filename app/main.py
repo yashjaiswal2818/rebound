@@ -4,10 +4,12 @@ Exposes webhooks for disruption ingestion and Twilio SMS approvals,
 enforces sub-100ms async acknowledgements, and provides APIs for the visualizer.
 """
 
+import glob
 import json
 import logging
 import os
 from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Request, Response
@@ -16,7 +18,9 @@ from fastapi.staticfiles import StaticFiles
 
 from agent.loop import ReboundAgent
 from agent.models import DisruptionEvent
+from agent.models import CabinClass, DisruptionEvent, FlightOffer, TravelerProfile
 from app.db import Database
+from clients.fakes import FakeCalendar, FakeDuffel, FakeGmail, FakeTwilio
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("rebound.api")
@@ -150,10 +154,72 @@ def get_trace(run_id: str) -> Dict[str, Any]:
 
 @app.post("/api/demo/trigger")
 async def trigger_demo_event(
+    scenario: str = "S01",
     event_type: str = "cancelled",
     scenario: str = "S01",
 ) -> Dict[str, Any]:
     """Convenience endpoint to fire demonstration disruption events."""
+    """Convenience endpoint to fire demonstration disruption events from fixtures or defaults."""
+    matching_fixtures = sorted(glob.glob(f"evals/fixtures/{scenario}*.json"))
+    if matching_fixtures:
+        with open(matching_fixtures[0], "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        event_data = dict(data["event"])
+        if "S10" not in scenario:
+            event_data["event_id"] = f"evt_demo_{scenario.lower()}_{int(datetime.now(timezone.utc).timestamp())}"
+
+        event = DisruptionEvent.model_validate(event_data)
+        profile = TravelerProfile.model_validate(data["profile"]) if "profile" in data else None
+
+        mock_duffel_data = data.get("mock_duffel", {})
+        offers = []
+        for item in mock_duffel_data.get("offers", []):
+            offers.append(
+                FlightOffer(
+                    id=item["id"],
+                    carrier=item.get("carrier", "ZZ"),
+                    flight_number=item.get("flight_number", "ZZ201"),
+                    departs_at=datetime.fromisoformat(item["departs_at"]),
+                    arrives_at=datetime.fromisoformat(item["arrives_at"]),
+                    total_amount=float(item["total_amount"]),
+                    segments=int(item.get("segments", 1)),
+                    cabin_class=CabinClass(item.get("cabin_class", "economy")),
+                )
+            )
+
+        failures = mock_duffel_data.get("failures", [])
+        duf = FakeDuffel(offers=offers, failures=failures)
+
+        cal_data = data.get("calendar", {})
+        cal_deadline = datetime.fromisoformat(cal_data.get("deadline", "2026-09-15T09:00:00Z"))
+        cal = FakeCalendar(
+            deadline=cal_deadline,
+            injected_failure=cal_data.get("injected_failure"),
+        )
+        gml = FakeGmail(injected_failure=data.get("mock_gmail", {}).get("injected_failure"))
+        twi = FakeTwilio(injected_failure=data.get("mock_twilio", {}).get("injected_failure"))
+
+        agent = ReboundAgent(
+            db=db,
+            duffel=duf,
+            calendar=cal,
+            twilio=twi,
+            gmail=gml,
+            profile=profile,
+            original_order_total=380.0,
+        )
+
+        sms_reply = data.get("sms_reply")
+        record = agent.run(event, sms_reply=sms_reply)
+        return {
+            "record": record.model_dump(),
+            "run_id": agent.run_id,
+            "scenario": scenario,
+            "description": data.get("description", ""),
+        }
+
+    # Fallback default
     event_id = f"evt_demo_{scenario.lower()}_{int(datetime.now(timezone.utc).timestamp())}"
     sample_event = DisruptionEvent(
         event_id=event_id,
@@ -165,9 +231,23 @@ async def trigger_demo_event(
             "destination": "JFK",
             "scheduled_departure": datetime.now(timezone.utc) + datetime.timedelta(hours=2),
             "scheduled_arrival": datetime.now(timezone.utc) + datetime.timedelta(hours=10),
+            "scheduled_departure": datetime.now(timezone.utc) + timedelta(hours=2),
+            "scheduled_arrival": datetime.now(timezone.utc) + timedelta(hours=10),
         },
     )
     agent = ReboundAgent(db=db)
     record = agent.run(sample_event)
     return {"record": record.model_dump(), "run_id": agent.run_id}
+    return {"record": record.model_dump(), "run_id": agent.run_id, "scenario": scenario}
+
+
+if os.path.exists("viewer"):
+    app.mount("/viewer", StaticFiles(directory="viewer", html=True), name="viewer")
+
+
+@app.get("/")
+def root_redirect():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/viewer/")
+
 

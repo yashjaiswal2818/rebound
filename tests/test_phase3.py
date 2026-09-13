@@ -259,6 +259,28 @@ class TestPhase3(unittest.TestCase):
         self.assertEqual(res_duplicate.status_code, 200)
         self.assertEqual(res_duplicate.json()["status"], "skipped_duplicate")
 
+        # Demo trigger endpoint
+        res_demo = client.post("/api/demo/trigger?scenario=S01")
+        self.assertEqual(res_demo.status_code, 200)
+        demo_data = res_demo.json()
+        self.assertIn("run_id", demo_data)
+        run_id = demo_data["run_id"]
+
+        # List runs endpoint
+        res_runs = client.get("/api/runs")
+        self.assertEqual(res_runs.status_code, 200)
+        self.assertIn("runs", res_runs.json())
+
+        # Trace endpoint
+        res_trace = client.get(f"/api/traces/{run_id}")
+        self.assertEqual(res_trace.status_code, 200)
+        self.assertIn("entries", res_trace.json())
+
+        # Viewer static endpoint
+        res_viewer = client.get("/viewer/")
+        self.assertEqual(res_viewer.status_code, 200)
+        self.assertIn(b"REBOUND", res_viewer.content)
+
 
 if __name__ == "__main__":
     unittest.main()
