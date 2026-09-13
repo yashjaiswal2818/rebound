@@ -165,5 +165,5 @@ For the complete breakdown of every scenario, see [**`EVAL_RESULTS.md`**](EVAL_R
 ---
 
 ## 👥 Team
-- **Yash Jaiswal** & Team
+- **Abhishek Jaiswal** & Team
 - Multi-App AI Agent Hackathon — San Francisco, 2026
