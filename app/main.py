@@ -156,9 +156,7 @@ def get_trace(run_id: str) -> Dict[str, Any]:
 async def trigger_demo_event(
     scenario: str = "S01",
     event_type: str = "cancelled",
-    scenario: str = "S01",
 ) -> Dict[str, Any]:
-    """Convenience endpoint to fire demonstration disruption events."""
     """Convenience endpoint to fire demonstration disruption events from fixtures or defaults."""
     matching_fixtures = sorted(glob.glob(f"evals/fixtures/{scenario}*.json"))
     if matching_fixtures:

@@ -151,7 +151,6 @@ class ReboundAgent:
             s["summary"] = "Disruption impacts trip. Proceeding to search alternative flights."
 
         # ---------------------------------------------------------------------
-        # Step 4: Search Flights
         # Step 4: Search Flights (with Exponential Backoff Retries)
         # ---------------------------------------------------------------------
         raw_offers: List[FlightOffer] = []
@@ -159,31 +158,6 @@ class ReboundAgent:
         search_max_attempts = 3
 
         with self.tracer.span("search", "duffel.offer_requests.create", {"origin": event.flight.origin, "destination": event.flight.destination}) as s:
-            dep_date = event.flight.scheduled_departure.strftime("%Y-%m-%d")
-            try:
-                raw_offers = self.duffel.search_offers(
-                    origin=event.flight.origin,
-                    destination=event.flight.destination,
-                    departure_date=dep_date,
-                    cabin_class=self.profile.preferences.cabin.value,
-                )
-                s["summary"] = f"Retrieved {len(raw_offers)} candidate offers from Duffel."
-            except Exception as e:
-                logger.error("Duffel search failed: %s", e)
-                s["summary"] = f"Duffel search error: {str(e)}"
-                s["status"] = TraceStatus.ERROR
-                self.tracer.log_entry(step="search:error", tool="duffel.offer_requests.create", status=TraceStatus.ERROR, output_summary=str(e))
-                # Escalate if Duffel fails permanently
-                self.twilio.send_sms(
-                    to_phone=self.profile.phone,
-                    body=f"[Rebound] {event.flight.number} disrupted, but flight search failed ({str(e)}). Please call the airline.",
-                    sms_type="escalation",
-                )
-                return DecisionRecord(
-                    event_id=event.event_id,
-                    action=ActionType.ESCALATE,
-                    reasoning=f"Flight search unavailable: {str(e)}",
-                )
             for attempt in range(1, search_max_attempts + 1):
                 try:
                     raw_offers = self.duffel.search_offers(
@@ -451,7 +425,6 @@ class ReboundAgent:
 
         # Step 8: Verify - Check order integrity
         with self.tracer.span("verify", "duffel.orders.get", {"order_id": booking.order_id}) as s:
-            verified_order = self.duffel.get_order(booking.order_id)
             verified_order = None
             try:
                 verified_order = self.duffel.get_order(booking.order_id)
@@ -524,9 +497,6 @@ class ReboundAgent:
             if event:
                 eligible, reason = check_eu261_eligibility(event)
                 if eligible:
-                    claim_body = f"Formal compensation claim under Regulation (EC) 261/2004 for {event.flight.number} on {event.flight.scheduled_departure.strftime('%Y-%m-%d')}."
-                    self.gmail.create_compensation_draft(self.profile.email, f"EU261 Claim - {event.flight.number}", claim_body)
-                    self.tracer.log_entry(step="claim:drafted", tool="gmail.draft", output_summary="EU261 compensation claim drafted.")
                     try:
                         claim_body = f"Formal compensation claim under Regulation (EC) 261/2004 for {event.flight.number} on {event.flight.scheduled_departure.strftime('%Y-%m-%d')}."
                         self.gmail.create_compensation_draft(self.profile.email, f"EU261 Claim - {event.flight.number}", claim_body)
