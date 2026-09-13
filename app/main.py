@@ -8,16 +8,18 @@ import glob
 import json
 import logging
 import os
-from datetime import datetime, timezone
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from agent.loop import ReboundAgent
-from agent.models import DisruptionEvent
 from agent.models import CabinClass, DisruptionEvent, FlightOffer, TravelerProfile
 from app.db import Database
 from clients.fakes import FakeCalendar, FakeDuffel, FakeGmail, FakeTwilio

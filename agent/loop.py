@@ -28,6 +28,7 @@ from agent.policy import (
     filter_survivors,
     is_delay_acceptable,
 )
+from agent.llm import call_gemini_ranking
 from agent.prompts import (
     format_ranking_user_prompt,
     parse_ranking_response,
@@ -213,8 +214,13 @@ class ReboundAgent:
             )
             return self._handle_escalation(event, deadline, "No flights found arriving before deadline within constraints.")
 
-        # Rank survivors using heuristic sorter or LLM
-        ranked_offers = fallback_rank_offers(survivors, self.profile, self.original_order_total)
+        # Rank survivors using Gemini Flash-Lite (or deterministic fallback)
+        ranked_offers, rank_reasons = call_gemini_ranking(
+            survivors=survivors,
+            profile=self.profile,
+            deadline_iso=deadline.isoformat(),
+            original_order_total=self.original_order_total,
+        )
         chosen_offer = ranked_offers[0]
         alternatives = [o.id for o in ranked_offers[1:3]]
 
